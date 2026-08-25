@@ -12,6 +12,12 @@ built on the same idea and almost none of the same machinery — because ED
 publishes nothing on GitHub, ships no `force` field, and versions its rules by
 date rather than by commit.
 
+> **Not legal advice, and not affiliated with the Department of Education.**
+> The obligation layer is machine-derived from regulatory prose, and eCFR — the
+> upstream source — is not the official legal edition of the CFR. A signature
+> here proves what was read and who signed for it, never that the reading was
+> right. See [What this is not](#what-this-is-not) before relying on any of it.
+
 ## Sources
 
 | id | publisher | what |
@@ -316,6 +322,51 @@ grep over prose:
 
 Exit 0 valid, 1 invalid.
 
+## What this is not
+
+Read this before using anything here to decide what an institution must do.
+
+**Not legal advice, and not a compliance determination.** Everything in the
+obligation layer is machine-derived from regulatory prose by the rules in
+[DESIGN.md](DESIGN.md) §5. No lawyer wrote it and no lawyer reviewed it. It is
+a research and monitoring instrument, not counsel.
+
+**Not affiliated with, endorsed by, or connected to** the U.S. Department of
+Education, the National Archives and Records Administration, the Office of the
+Federal Register, or the Government Publishing Office. It is an independent
+project that reads their public APIs.
+
+**The upstream source is not the official legal edition of the CFR.** This is
+the sharpest limitation here, and it belongs to eCFR rather than to this tool.
+The eCFR is an *editorial compilation* of CFR material and Federal Register
+amendments produced by the OFR and GPO. The Administrative Committee of the
+Federal Register has not granted it official legal status, and until it does
+the compilation **does not provide legal notice to the public or judicial
+notice to the courts**. Anyone relying on it for legal research is directed to
+verify results against the official edition of the CFR, the Federal Register,
+and the List of CFR Sections Affected (LSA). A signed chain over an
+unofficial source is still an unofficial source, signed.
+
+**A signature proves provenance, not correctness.** The chain proves *what this
+program read from eCFR on a given date, and who signed for it*. It does not
+prove that the reading was right, that the derived obligations are complete, or
+that a bearer was classified correctly. Those are two different claims and
+conflating them would be the most damaging thing this project could do.
+
+**The derivation has measured limits, and they are published with the results
+rather than behind them.** As of `chain-v2`: 88 unresolved designator sequences
+across 36,828 paragraphs, 5,841 of 18,088 atoms with an unclassified bearer,
+and 9 amendments published in the Federal Register but not yet incorporated
+into the text a pin retrieves. Those figures are inside the signed payload and
+on every release, so an artifact can never claim a cleaner read than the run
+achieved. `applicant` means a student in Title IV and a grant applicant in the
+grants parts, and nothing here yet resolves which; second-person `you` is
+defined locally per subpart and is reported as `addressee` rather than guessed.
+
+**Incremental runs trust the ledger.** A change eCFR did not record in its
+amendment ledger is invisible until the next full pass, which the schedule runs
+weekly.
+
 ## Tests
 
 ```sh
@@ -329,8 +380,26 @@ the lead-in descent, definition scoping, `may not` as a prohibition, the actor
 nearest the modal, and the UTF-8 boundary that an em dash puts in the middle of
 a subject phrase.
 
+## License
+
+Dual-licensed under [MIT](LICENSE-MIT) **OR** [Apache-2.0](LICENSE-APACHE), at
+your option.
+
+That covers the code. It does not cover the regulatory text: 34 CFR is a work
+of the United States Government and an edict of government, and the snapshots
+in `data/` and in each release are reproductions of it, not a work of
+authorship of this project.
+
 ## Status
 
-Ingestion, parsing, obligation derivation and offline replay are in place and
-measured. The signed chain, the change report, applicability profiles, receipts
-and the MCP server are specified in [DESIGN.md](DESIGN.md) and not yet built.
+**Built and running.** Ingestion, paragraph reconstruction, obligation
+derivation, offline replay, the signed chain, incremental change detection, the
+change report, and releases — with CI watching on a schedule and publishing
+each version.
+
+**Specified in [DESIGN.md](DESIGN.md) and not built.** Applicability profiles,
+which are what turn 34 CFR into an answer to *what binds me* rather than *what
+does it say* — an institution of higher education by control, an LEA, an SEA, an
+accrediting agency, a lender, a State VR agency. Also: resolving second-person
+`you` against the subpart that defines it, the `register` / `statute` /
+`accreditation` sources, receipts, and the MCP server.

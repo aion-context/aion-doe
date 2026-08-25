@@ -26,6 +26,28 @@ publishers, each with its own idea of what a version is.
 | `statute` | govinfo | `api.govinfo.gov` | U.S. Code Title 20 — the statute 34 CFR implements and cites but never restates | package `lastModified` |
 | `accreditation` | ED/OPE | `ope.ed.gov/dapip/api` | DAPIP — accredited institutions, agencies, programs | content digest, §6 |
 
+### 1.1 The primary source is not the official legal edition
+
+Worth stating in the design rather than only in the README, because it bounds
+what the artifact can ever claim. The eCFR is an **editorial compilation** of
+CFR material and Federal Register amendments produced by the OFR and GPO. The
+Administrative Committee of the Federal Register has not granted it official
+legal status, and until it does the compilation does not provide legal notice
+to the public or judicial notice to the courts; users are directed to verify
+against the official CFR, the Federal Register, and the LSA.
+
+Two consequences the pipeline is built around:
+
+- **The chain's claim is provenance, not correctness.** It proves what this
+  program read from eCFR at a pinned date and who signed for it. Every
+  derivation limit is therefore carried *inside* the signed payload — unresolved
+  designator sequences, unclassified bearers, pending amendments — so the
+  artifact cannot be read as an authoritative index of what 34 CFR requires.
+- **`register` is not decoration.** The Federal Register *is* an official
+  source, and every eCFR section carries a `CITA` credit and any `XREF`
+  amendment notice back to it. That join is what lets a reader take a derived
+  obligation back to something that does provide legal notice.
+
 **Rejected sources**, recorded so the question is not reopened:
 
 - **FSA Knowledge Center** (`fsapartners.ed.gov`) — Dear Colleague Letters and
