@@ -1,0 +1,154 @@
+name: watch
+
+# eCFR updates on business days as amendments are incorporated; a daily run an
+# hour into the US working day catches them. The push trigger means the chain
+# bootstraps itself: the first run after any push to main writes genesis, with
+# no one having to start it by hand.
+on:
+  schedule:
+    - cron: '30 13 * * 1-5'
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      date:
+        description: Pin to a specific date instead of the title's current one
+        type: string
+      force:
+        description: Sign a chain version even when nothing moved
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: doe-watch
+  cancel-in-progress: false
+
+# Repository variables, so the identity can be re-pointed without editing this
+# file. The seed itself is a secret, never a variable: variables are plaintext
+# and are not masked in logs.
+env:
+  AION_AUTHOR: ${{ vars.AION_AUTHOR || '1' }}
+  AION_KEY: ${{ vars.AION_KEY || '1' }}
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    # A push by the bot is the tail end of this workflow's own auto-merge.
+    # Re-running then would only re-confirm that nothing moved.
+    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - run: cargo build --release --locked
+
+      # Reads the amendment ledger, pulls only the parts that moved, derives the
+      # obligations, and signs a new version only if something actually changed.
+      # The chain is verified inside this step before it succeeds.
+      - name: sync
+        id: sync
+        env:
+          AION_SIGNING_KEY: ${{ secrets.AION_SIGNING_KEY }}
+          DATE: ${{ inputs.date && format('--date {0}', inputs.date) || '' }}
+          FORCE: ${{ inputs.force && '--force' || '' }}
+        run: |
+          ./target/release/doe-aion sync \
+            --author "$AION_AUTHOR" \
+            --key "$AION_KEY" \
+            --report out/CHANGES.md \
+            --outputs "$GITHUB_OUTPUT" \
+            $DATE $FORCE
+
+      - name: verify the signed chain independently
+        if: steps.sync.outputs.committed == 'true'
+        run: ./target/release/doe-aion verify
+
+      - name: job summary
+        if: always() && hashFiles('out/CHANGES.md') != ''
+        run: cat out/CHANGES.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Branch name is the bundle digest: hex, unique per upstream state, and it
+      # never carries regulatory text into a shell.
+      - name: open pull request
+        id: pr
+        if: steps.sync.outputs.committed == 'true'
+        env:
+          # An org that disables "Allow GitHub Actions to create and approve
+          # pull requests" blocks github.token from opening one. A PAT secret,
+          # if present, is used instead; otherwise fix the org toggle.
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+          HEADLINE: ${{ steps.sync.outputs.headline }}
+          SEVERITY: ${{ steps.sync.outputs.severity }}
+          DIGEST: ${{ steps.sync.outputs.bundle_sha256 }}
+        run: |
+          set -euo pipefail
+          branch="doe-sync/${DIGEST:0:12}"
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$branch"
+          git add doe.aion data
+          # Regulatory text reaches git only through a quoted variable, never
+          # through shell interpolation.
+          printf '%s\n' "$HEADLINE" | git commit --file -
+          git push --force origin "$branch"
+
+          gh label create "$SEVERITY" --force --color ededed >/dev/null 2>&1 || true
+          url=$(gh pr list --head "$branch" --state open --json url --jq '.[0].url // empty')
+          if [ -z "$url" ]; then
+            url=$(gh pr create \
+              --title "$HEADLINE" \
+              --body-file out/CHANGES.md \
+              --label "$SEVERITY" \
+              --head "$branch" \
+              --base "${GITHUB_REF_NAME}")
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      # Each PR is a full snapshot against main, not a delta, so an older open
+      # one is strictly contained in this one.
+      - name: close superseded pull requests
+        if: steps.pr.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+          KEEP: ${{ steps.pr.outputs.branch }}
+          URL: ${{ steps.pr.outputs.url }}
+        run: |
+          set -euo pipefail
+          gh pr list --state open --json number,headRefName \
+            --jq '.[] | select(.headRefName | startswith("doe-sync/")) | "\(.number) \(.headRefName)"' \
+          | while read -r number head; do
+              [ "$head" = "$KEEP" ] && continue
+              gh pr close "$number" --delete-branch \
+                --comment "Superseded by $URL, which contains this change plus later upstream movement."
+            done
+
+      # A new pin with no movement in the regulation is bookkeeping. Anything
+      # that touched a section — substantive or technical — waits for a human,
+      # because the whole point of the artifact is that a person stands behind
+      # what it says the Department requires.
+      - name: auto-merge metadata-only changes
+        if: steps.pr.outputs.url != '' && steps.sync.outputs.severity == 'metadata'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+          URL: ${{ steps.pr.outputs.url }}
+        run: |
+          gh pr merge "$URL" --squash --delete-branch --auto \
+            || gh pr merge "$URL" --squash --delete-branch
