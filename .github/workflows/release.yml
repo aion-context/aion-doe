@@ -78,6 +78,9 @@ jobs:
       - name: publish release
         env:
           GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+          # Through an env var, not `${{ }}` interpolated into the script, so
+          # the pattern holds for every value the notes embed.
+          REPO: ${{ github.repository }}
           TAG: ${{ steps.chain.outputs.tag }}
           VERSION: ${{ steps.chain.outputs.version }}
           PINNED: ${{ steps.chain.outputs.pinned_date }}
@@ -125,7 +128,7 @@ jobs:
             echo "### Verify this artifact independently"
             echo
             echo '```sh'
-            echo "gh release download $TAG --repo \$GITHUB_REPOSITORY"
+            echo "gh release download $TAG --repo $REPO"
             echo "tar -xzf title-34-data.tar.gz"
             echo "doe-aion verify            # chain, signature, and data/ digests"
             echo "aion verify doe.aion --registry registry.json   # chain alone"
