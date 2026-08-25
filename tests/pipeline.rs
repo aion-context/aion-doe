@@ -465,6 +465,35 @@ fn the_signed_bytes_do_not_depend_on_when_the_run_happened() {
 }
 
 #[test]
+fn the_bundle_depends_on_the_pin_and_not_on_the_path_taken_to_it() {
+    // Arriving at a date through an intermediate version must produce the same
+    // signed bundle as pinning it directly, or the artifact would say something
+    // different depending on when the watcher happened to run.
+    let upstream = quiet_upstream("path");
+
+    let direct = plan::build(&upstream.fetcher(), None).unwrap();
+
+    let stepwise = Repo::new("path");
+    upstream.ledger("2026-05-01", &[("668.14", "668", "2026-05-01", true)]);
+    assert!(stepwise.sync(&upstream.fetcher(), None).1);
+    upstream.ledger(
+        "2026-07-20",
+        &[
+            ("99.3", "99", "2026-01-15", true),
+            ("668.14", "668", "2026-07-20", true),
+        ],
+    );
+    assert!(stepwise.sync(&upstream.fetcher(), None).1);
+
+    let arrived = chain::previous_bundle(&stepwise.chain()).unwrap().unwrap();
+    assert_eq!(
+        arrived.digest().unwrap(),
+        direct.bundle.digest().unwrap(),
+        "two paths to the same pin must sign identical bytes"
+    );
+}
+
+#[test]
 fn data_written_by_the_run_matches_the_payload_it_signed() {
     let upstream = quiet_upstream("agreement");
     let repo = Repo::new("agreement");

@@ -32,7 +32,7 @@ pub fn headline(changes: &Changes, bundle: &Bundle) -> String {
 pub fn markdown(plan: &Plan, changes: &Changes, previous: Option<&Bundle>) -> String {
     let bundle = &plan.bundle;
     let mut out = String::new();
-    let _ = writeln!(out, "# 34 CFR \u{2014} {}", headline(changes, bundle));
+    let _ = writeln!(out, "# {}", headline(changes, bundle));
     let _ = writeln!(out);
     let _ = writeln!(out, "| | |");
     let _ = writeln!(out, "|---|---|");
@@ -70,7 +70,8 @@ pub fn markdown(plan: &Plan, changes: &Changes, previous: Option<&Bundle>) -> St
         );
     }
 
-    if !changes.ledger.amended.is_empty() {
+    // On genesis every section is "added"; listing 8,127 of them says nothing.
+    if !changes.ledger.amended.is_empty() && !changes.genesis {
         let _ = writeln!(out, "## Sections amended\n");
         let mut rows = changes.ledger.amended.clone();
         rows.sort_by(|a, b| b.row.amendment_date.cmp(&a.row.amendment_date));
@@ -100,7 +101,7 @@ pub fn markdown(plan: &Plan, changes: &Changes, previous: Option<&Bundle>) -> St
         let _ = writeln!(out);
     }
 
-    if !changes.ledger.added.is_empty() {
+    if !changes.ledger.added.is_empty() && !changes.genesis {
         let _ = writeln!(out, "## Sections added\n");
         for row in changes.ledger.added.iter().take(40) {
             let _ = writeln!(out, "- `34 CFR {}` \u{2014} {}", row.identifier, row.name);
@@ -108,7 +109,7 @@ pub fn markdown(plan: &Plan, changes: &Changes, previous: Option<&Bundle>) -> St
         let _ = writeln!(out);
     }
 
-    if !changes.ledger.dropped.is_empty() {
+    if !changes.ledger.dropped.is_empty() && !changes.genesis {
         let _ = writeln!(out, "## Sections no longer listed\n");
         for row in changes.ledger.dropped.iter().take(40) {
             let _ = writeln!(out, "- `34 CFR {}` \u{2014} {}", row.identifier, row.name);
@@ -242,6 +243,51 @@ mod tests {
         let text = headline(&changes(Severity::Major, true), &bundle());
         assert!(text.contains("genesis"));
         assert!(text.contains("110 parts"));
+    }
+
+    #[test]
+    fn genesis_does_not_list_every_section_as_an_addition() {
+        let mut genesis = changes(Severity::Major, true);
+        genesis.ledger.added = vec![crate::cfr::ledger::Row {
+            identifier: "100.1".into(),
+            name: "\u{a7} 100.1 Purpose.".into(),
+            part: "100".into(),
+            subpart: None,
+            amendment_date: "2016-12-08".into(),
+            issue_date: "2016-12-19".into(),
+            substantive: true,
+            removed: false,
+            kind: "section".into(),
+        }];
+        let plan = Plan {
+            bundle: bundle(),
+            parsed: Vec::new(),
+            import_in_progress: false,
+            retired_parts: Vec::new(),
+        };
+        let text = markdown(&plan, &genesis, None);
+        assert!(text.contains("no delta to show"));
+        assert!(
+            !text.contains("Sections added"),
+            "genesis must not present the whole title as a change"
+        );
+    }
+
+    #[test]
+    fn the_heading_is_not_doubled() {
+        let plan = Plan {
+            bundle: bundle(),
+            parsed: Vec::new(),
+            import_in_progress: false,
+            retired_parts: Vec::new(),
+        };
+        let first = markdown(&plan, &changes(Severity::Major, false), None)
+            .lines()
+            .next()
+            .unwrap()
+            .to_string();
+        assert_eq!(first.matches("34 CFR").count(), 0, "got: {first}");
+        assert!(first.starts_with("# TITLE 34 CHANGED"));
     }
 
     #[test]

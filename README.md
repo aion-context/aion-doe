@@ -186,6 +186,33 @@ derivation's own limits rather than only its results. The regulation text lives
 in `data/`, committed alongside and bound by those digests: edit the text and
 `verify` fails, edit both and the signature fails.
 
+## Replay against real history
+
+Run against Title 34 as it stood on 2026-07-15, then advanced to 2026-08-21:
+
+```
+34 CFR genesis — 108 parts, 3290 sections as of 2026-07-15
+TITLE 34 CHANGED — 22 section(s) moved (13 substantive) across 6 part(s), as of 2026-08-21
+```
+
+The Federal Register lists exactly three ED rules in that window. All three come
+back out, with the right sections and the right dates — the two Title VI /
+civil-rights rescissions (`100.3`, `100.5` amended; three appendices across
+parts 100, 104 and 106 **removed**) and the Workforce Pell rule (`600.10`,
+`668.5/.8/.20/.32`, `690.2/.6/.11` amended, and a new subpart `690.90`–`690.97`
+covering eligible workforce programs and value-added earnings).
+
+The Federal Register also names **34 CFR 685**, and the diff does not report it —
+correctly. Those amendments are published and *not yet incorporated*: the run
+reports 9 pending amendments and every one cites the same rule, `685.102` and
+`685.300` among them. The regulation an institution reads today has not changed;
+the rule that will change it exists. An artifact that reported only one of those
+would be misleading, so it carries both.
+
+And version 2's bundle digest is byte-identical to pinning 2026-08-21 directly
+with no intermediate version: the signed artifact is a function of the pin, not
+of when the watcher happened to run.
+
 ## Quick start
 
 ```sh
@@ -211,6 +238,39 @@ Working offline against captured snapshots — how the logic is iterated:
 doe-aion capture --out snapshots
 doe-aion --from-dir snapshots sweep
 ```
+
+## Running as an action
+
+`.github/workflows/watch.yml` runs on weekdays at 13:30 UTC and on any push to
+`main`. Only a `metadata` change — a new pin with no movement in any section —
+is auto-merged. Anything that touched a regulation, substantive or technical,
+waits for a reviewer, because the point of the artifact is that a person stands
+behind what it says the Department requires.
+
+**Nothing needs starting by hand.** The genesis chain is written by the first
+run that finds no `doe.aion`, so pushing the repo is enough to bootstrap it.
+
+The one unavoidable human act is placing the signing key, because the point of
+the artifact is that a person controls the identity behind the signature:
+
+```sh
+# once: create the identity and pin its public half
+doe-aion keygen --key 1 --author 1 --keystore .keys --registry registry.json
+git add registry.json && git commit -m 'pin the signing identity'
+
+# load the secret. `secret` prints the seed on stdout only, so it pipes
+# without ever being displayed, and refuses to print a key the committed
+# registry does not pin.
+doe-aion secret | gh secret set AION_SIGNING_KEY
+```
+
+`registry.json` carries only public keys. Without the secret the sync step
+fails rather than producing an unsigned artifact.
+
+> The file keystore encrypts to the machine that created it, so `.keys/` is
+> local to one box. Back up the seed itself, not the key file. If the identity
+> is lost, `keygen` starts a new one and the chain's continuity restarts with
+> it — which is why `secret` refuses to reveal a key the registry does not pin.
 
 ## Tests
 

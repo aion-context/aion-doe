@@ -300,6 +300,42 @@ Deliberately out of scope for now: deciding that an atom applies to a given
 institution. That is applicability, and it is a separate, explicitly curated
 judgement — see §9.
 
+## 5.1 Replay against real upstream history
+
+The pipeline was run against the title as it stood on **2026-07-15** and then
+advanced to **2026-08-21**, both from captured snapshots, and its output was
+checked against the Federal Register rather than against itself.
+
+```
+34 CFR genesis — 108 parts, 3290 sections as of 2026-07-15
+signed version 1 of doe.aion — bundle d529b547b36c0dc4
+
+TITLE 34 CHANGED — 22 section(s) moved (13 substantive) across 6 part(s), as of 2026-08-21
+signed version 2 of doe.aion — bundle 6d8c7d04d36ea7e1
+```
+
+The Federal Register lists exactly three ED rules in that window. All three are
+reproduced, with the right sections and the right dates:
+
+| FR document | effective | detected |
+|---|---|---|
+| Rescinding Guidelines for Eliminating Discrimination… (34 CFR 100, 104, 106) | 2026-07-23 | Appendix B to Part 100, Appendix B to Part 104, Appendix A to Part 106 — all three **removed**, dated 2026-07-23 |
+| Rescinding Portions of the Title VI Regulations (34 CFR 100) | 2026-07-24 | `100.3` and `100.5` amended, dated 2026-07-24 |
+| Accountability in Higher Education… Demand-Driven Workforce Pell (34 CFR 600, 668, 685) | 2027-07-01 | `600.10`, `668.5`, `668.8`, `668.20`, `668.32`, `690.2`, `690.6`, `690.11` amended 2026-07-20, plus a new subpart `690.90`–`690.97` |
+
+The third row is the interesting one. The Federal Register names **34 CFR 685**,
+and the diff does not report it — correctly. Those amendments are *published and
+not yet incorporated*: the run reports 9 pending amendments, and every one of
+them cites the same rule (91 FR 40280–40287), including `685.102` and `685.300`.
+The regulation an institution reads today has not changed; the rule that will
+change it exists. Reporting only one of those two facts would be misleading, so
+the artifact carries both.
+
+**Path independence.** Version 2's bundle digest, `6d8c7d04d36ea7e1`, is
+byte-identical to the digest produced by pinning 2026-08-21 directly with no
+intermediate version. The signed artifact is a function of the pin, not of when
+the watcher happened to run or what it saw on the way.
+
 ## 6. Determinism invariants
 
 The signed payload must be a pure function of the pinned date and the pinned
