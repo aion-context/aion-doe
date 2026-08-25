@@ -98,6 +98,9 @@ enum Command {
         registry: std::path::PathBuf,
         #[arg(long, default_value = "data")]
         data: std::path::PathBuf,
+        /// Emit the verdict as JSON. Exit 0 valid, 1 invalid.
+        #[arg(long)]
+        json: bool,
     },
     /// What eCFR says about Title 34 right now.
     Status,
@@ -283,18 +286,51 @@ fn main() -> Result<()> {
             chain: path,
             registry,
             data,
+            json,
         } => {
             let registry_keys = chain::load_registry(&registry)?;
             let verification = chain::verify(&path, &registry_keys)?;
+            let bundle = chain::previous_bundle(&path)?
+                .ok_or_else(|| anyhow::anyhow!("{} has no payload", path.display()))?;
+            let mismatches = chain::data_matches(&bundle, &data)?;
+
+            if json {
+                // A structured contract, so a release job never has to grep
+                // prose for a version number.
+                let verdict = serde_json::json!({
+                    "chain": path.display().to_string(),
+                    "valid": verification.is_valid && mismatches.is_empty(),
+                    "chain_valid": verification.is_valid,
+                    "data_matches": mismatches.is_empty(),
+                    "version": verification.version_count,
+                    "title": bundle.title,
+                    "pinned_date": bundle.pinned_date,
+                    "latest_amendment_date": bundle.latest_amendment_date,
+                    "bundle_sha256": bundle.digest()?,
+                    "parts": bundle.totals.parts,
+                    "sections": bundle.totals.sections,
+                    "paragraphs": bundle.totals.paragraphs,
+                    "atoms": bundle.totals.atoms,
+                    "binding": bundle.totals.binding,
+                    "unresolved": bundle.totals.unresolved,
+                    "unclassified_bearer": bundle.totals.unclassified_bearer,
+                    "pending_amendments": bundle.totals.pending,
+                    "errors": verification.errors,
+                    "mismatches": mismatches,
+                });
+                println!("{}", serde_json::to_string_pretty(&verdict)?);
+                if verification.is_valid && mismatches.is_empty() {
+                    return Ok(());
+                }
+                std::process::exit(1);
+            }
+
             anyhow::ensure!(
                 verification.is_valid,
                 "chain {} is not valid: {:?}",
                 path.display(),
                 verification.errors
             );
-            let bundle = chain::previous_bundle(&path)?
-                .ok_or_else(|| anyhow::anyhow!("{} has no payload", path.display()))?;
-            let mismatches = chain::data_matches(&bundle, &data)?;
             anyhow::ensure!(
                 mismatches.is_empty(),
                 "{} does not match the signed payload: {}",
@@ -302,8 +338,9 @@ fn main() -> Result<()> {
                 mismatches.join("; ")
             );
             println!(
-                "{} verified \u{2014} 34 CFR as of {}, {} parts, {} sections, bundle {}",
+                "{} verified \u{2014} chain version {}, 34 CFR as of {}, {} parts, {} sections, bundle {}",
                 path.display(),
+                verification.version_count,
                 bundle.pinned_date,
                 bundle.totals.parts,
                 bundle.totals.sections,

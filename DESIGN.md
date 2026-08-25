@@ -404,6 +404,21 @@ DAPIP refresh.
 | chain fails verification after commit | fail the run loudly; the bad file is not pushed |
 | CI signing key not in the registry | commit refuses |
 
+## 8.1 Releases
+
+Each signed version is published as `chain-vN`, carrying the chain, the
+registry, and a reproducibly-built archive of the part snapshots. Two
+assertions guard it, both of the same shape: **publish nothing that does not
+verify**, and **assert the archive's contents against the payload** — one
+snapshot per part plus the ledger. An archive carrying fewer snapshots than the
+chain signed is worse than a failed release, because it looks complete.
+
+The release notes state the derivation's limits next to its results, for the
+same reason the payload carries them.
+
+`verify --json` is the contract the release job reads, so no step in the
+pipeline greps prose for a version number.
+
 ## 9. Still open
 
 - **Applicability.** Which parts bind which entity — an institution of higher

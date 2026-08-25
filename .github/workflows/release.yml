@@ -1,0 +1,158 @@
+name: release
+
+# Publishes the signed chain as a downloadable artifact whenever a new version
+# lands on main. The chain in the repo is the source of truth; a release is a
+# stable, citable URL for what 34 CFR required at that version — which is the
+# whole point of the artifact, and useless if it only exists on a branch.
+on:
+  push:
+    branches: [main]
+    paths: ['doe.aion']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: doe-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # This org permits GitHub-owned actions only.
+      - name: rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - run: cargo build --release --locked
+
+      # Refuse to publish an artifact that does not verify. `verify --json` is
+      # a structured contract precisely so this step never greps prose for a
+      # version number.
+      - name: verify before publishing
+        id: chain
+        run: |
+          set -euo pipefail
+          ./target/release/doe-aion verify --json > verdict.json
+          ./target/release/doe-aion verify > verify.txt
+          jq -r '
+            "version=\(.version)",
+            "pinned_date=\(.pinned_date)",
+            "amendment=\(.latest_amendment_date)",
+            "parts=\(.parts)",
+            "sections=\(.sections)",
+            "atoms=\(.atoms)",
+            "binding=\(.binding)",
+            "unresolved=\(.unresolved)",
+            "unclassified=\(.unclassified_bearer)",
+            "pending=\(.pending_amendments)",
+            "digest=\(.bundle_sha256)",
+            "tag=chain-v\(.version)"
+          ' verdict.json >> "$GITHUB_OUTPUT"
+
+      # 108 part snapshots as 108 release assets would be unreadable, so they
+      # travel as one archive. Built from a glob rather than a list: a
+      # hardcoded set silently omits anything added later.
+      - name: archive the signed snapshots
+        run: |
+          set -euo pipefail
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+              --mtime='UTC 1970-01-01' \
+              -czf title-34-data.tar.gz data
+          tar -tzf title-34-data.tar.gz | grep -c '\.json$' > archived.txt
+          echo "archived $(cat archived.txt) snapshots"
+
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || github.token }}
+          TAG: ${{ steps.chain.outputs.tag }}
+          VERSION: ${{ steps.chain.outputs.version }}
+          PINNED: ${{ steps.chain.outputs.pinned_date }}
+          AMENDMENT: ${{ steps.chain.outputs.amendment }}
+          PARTS: ${{ steps.chain.outputs.parts }}
+          SECTIONS: ${{ steps.chain.outputs.sections }}
+          ATOMS: ${{ steps.chain.outputs.atoms }}
+          BINDING: ${{ steps.chain.outputs.binding }}
+          UNRESOLVED: ${{ steps.chain.outputs.unresolved }}
+          UNCLASSIFIED: ${{ steps.chain.outputs.unclassified }}
+          PENDING: ${{ steps.chain.outputs.pending }}
+          DIGEST: ${{ steps.chain.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists"
+            exit 0
+          fi
+          {
+            echo "Signed 34 CFR chain, version **$VERSION**, as retrieved from eCFR on \`$PINNED\`."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| pinned date | \`$PINNED\` |"
+            echo "| latest amendment incorporated | \`$AMENDMENT\` |"
+            echo "| parts / sections | $PARTS / $SECTIONS |"
+            echo "| obligation atoms | $ATOMS ($BINDING binding) |"
+            echo "| bundle sha256 | \`$DIGEST\` |"
+            echo
+            echo "### What the derivation could not settle"
+            echo
+            echo "These are signed alongside the results, so the artifact never claims"
+            echo "a cleaner read than it achieved."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| unresolved designator sequences | $UNRESOLVED |"
+            echo "| atoms with an unclassified bearer | $UNCLASSIFIED |"
+            echo "| amendments published but not yet incorporated | $PENDING |"
+            echo
+            echo '```'
+            cat verify.txt
+            echo '```'
+            echo
+            echo "### Verify this artifact independently"
+            echo
+            echo '```sh'
+            echo "gh release download $TAG --repo \$GITHUB_REPOSITORY"
+            echo "tar -xzf title-34-data.tar.gz"
+            echo "doe-aion verify            # chain, signature, and data/ digests"
+            echo "aion verify doe.aion --registry registry.json   # chain alone"
+            echo '```'
+            echo
+            echo "\`registry.json\` pins the public key; no private material is published."
+          } > notes.md
+
+          gh release create "$TAG" \
+            --title "34 CFR chain v$VERSION — as of $PINNED" \
+            --notes-file notes.md \
+            doe.aion \
+            registry.json \
+            title-34-data.tar.gz
+
+          # An archive that quietly carries fewer snapshots than the chain
+          # signed is worse than a failed release, so assert the count. One
+          # file per part, plus the ledger.
+          expected=$(( PARTS + 1 ))
+          archived=$(cat archived.txt)
+          if [ "$archived" -ne "$expected" ]; then
+            echo "::error::archive carries $archived snapshots, expected $expected"
+            exit 1
+          fi
+          uploaded=$(gh release view "$TAG" --json assets --jq '.assets | length')
+          if [ "$uploaded" -ne 3 ]; then
+            echo "::error::release $TAG carries $uploaded assets, expected 3"
+            exit 1
+          fi
+          echo "$TAG published with $uploaded assets and $archived snapshots"

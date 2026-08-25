@@ -278,6 +278,44 @@ fails rather than producing an unsigned artifact.
 > is lost, `keygen` starts a new one and the chain's continuity restarts with
 > it — which is why `secret` refuses to reveal a key the registry does not pin.
 
+## Releases
+
+Every signed chain version is published as a release, tagged `chain-vN`. The
+repo is the source of truth; a release is a **stable, citable URL for what 34
+CFR required at that version** — which is the point of the artifact and useless
+if it only ever exists on a branch.
+
+Three assets: the signed `doe.aion`, the `registry.json` that pins the public
+key, and `title-34-data.tar.gz` carrying all 108 part snapshots plus the ledger
+(2.1 MB, built reproducibly). The release notes carry the pin, the bundle
+digest, the totals — **and what the derivation could not settle**: unresolved
+designator sequences, unclassified bearers, and amendments published but not
+yet incorporated. A release that reported only the results would be claiming a
+cleaner read than the run achieved.
+
+```sh
+gh release download chain-v2 --repo aion-context/aion-doe
+tar -xzf title-34-data.tar.gz
+doe-aion verify            # chain, signature, and every data/ digest
+```
+
+The job refuses to publish a chain that does not verify, and asserts the
+archive carries one snapshot per part plus the ledger — an archive quietly
+shipping fewer snapshots than the chain signed would be worse than a failed
+release.
+
+`verify --json` exists so that check is a structured contract rather than a
+grep over prose:
+
+```json
+{ "valid": true, "version": 2, "pinned_date": "2026-08-24",
+  "bundle_sha256": "1c7277ab26daa0df…", "parts": 108, "sections": 3296,
+  "atoms": 18088, "binding": 12064,
+  "unresolved": 88, "unclassified_bearer": 5841, "pending_amendments": 9 }
+```
+
+Exit 0 valid, 1 invalid.
+
 ## Tests
 
 ```sh
