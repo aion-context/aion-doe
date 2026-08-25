@@ -12,12 +12,14 @@ use crate::severity::Severity;
 
 /// A part as read, kept alongside its record so `data/` and the payload are
 /// written from the same parse.
+#[derive(Debug)]
 pub struct Parsed {
     pub number: String,
     pub record: PartRecord,
     pub document: serde_json::Value,
 }
 
+#[derive(Debug)]
 pub struct Plan {
     pub bundle: Bundle,
     pub parsed: Vec<Parsed>,

@@ -102,6 +102,35 @@ Portions of the Department of Education Title VI Regulations…", 34 CFR 100)
 carries `effective_on: 2026-07-24`. The Register leads, the CFR follows, and
 the two can be checked against each other.
 
+### 3.1 The ledger is history, not a table of contents
+
+Measured 2026-08-25: the ledger holds **8,127 distinct section identifiers**,
+while the title actually contains **3,296** live sections across 108
+non-reserved parts. The difference is every section the title has ever had.
+
+That is not a curiosity — driving the fetch from the ledger's part list makes
+the run fail. Part 230 appears in the ledger and **404s** at 2026-08-21,
+because the part no longer exists. The live set comes from
+`structure/{date}/title-34.json`; the ledger drives change detection only. The
+difference between the two is reported as **retired parts**, which is
+information neither endpoint gives on its own.
+
+### 3.2 The ledger must be pinned to the same date as the text
+
+`versions/title-34.json` unfiltered returns the ledger **as it stands today**.
+Pinning the text to a past date while reading a current ledger would sign a
+bundle whose ledger describes amendments the text does not contain — and it
+would do so silently, because today's ledger happens to agree with today's
+text. Measured:
+
+| request | rows | latest amendment |
+|---|---|---|
+| `issue_date[lte]=2026-07-15` | 8,105 | 2026-07-01 |
+| `issue_date[lte]=2026-08-21` | 8,127 | 2026-07-24 |
+| unfiltered | 8,127 | 2026-07-24 |
+
+The filter is therefore mandatory, not an optimisation.
+
 ## 4. Reading the regulation
 
 `cfr` is XML, not JSON, and the structure that matters is not in the markup.
@@ -184,11 +213,16 @@ level; otherwise it prefers the successor. **32 → 12.**
 
 ### 4.3 Where it stands
 
-**12 unresolved sequences in 4,721 paragraphs of 34 CFR 668 — 0.25%.** They are
-reported per section with the offending token, the path it did not fit, and the
-text, never silently absorbed. Dropping a paragraph would drop regulatory text;
-a citation that is wrong and flagged is recoverable, one that is wrong and
-silent is not.
+**12 unresolved sequences in 4,721 paragraphs of 34 CFR 668 — 0.25%.** Across
+the whole title: **88 in 36,828 paragraphs, also 0.24%**, over 108 parts and
+3,296 sections. The worst part is 34 CFR 642 at 4.9% (9 of 183); no other part
+exceeds 3%.
+
+They are reported per section with the offending token, the path it did not
+fit, and the text, never silently absorbed. Dropping a paragraph would drop
+regulatory text; a citation that is wrong and flagged is recoverable, one that
+is wrong and silent is not. The count is carried in the signed payload, so the
+artifact cannot claim a cleaner parse than it achieved.
 
 ## 5. Obligations
 
@@ -239,6 +273,22 @@ Bearer classification found 969 institution, 221 second-person, 195 Secretary,
 a proceeding, 32 hearing official, 19 test publisher, 8 accrediting agency.
 **355 unclassified — 16.5%.** The first pass was 34%; the gap closed by adding
 the actors ED actually drafts for rather than the ones FedRAMP has.
+
+Across the whole title as of 2026-08-21: **36,828 paragraphs → 18,088 atoms,
+12,064 of them binding.**
+
+Bearer classification generalises worse than parsing does, and the measurement
+says so. Patterns tuned on Title IV left **39.9% unclassified title-wide**
+against 16.5% in part 668, because the K-12, disability and grants parts are
+drafted in a different vocabulary: `SEA`, `LEA`, `public agency`, `subgrantee`,
+`insular area`, `the Governor`, the `IEP Team`, a State `advisory panel`. Adding
+the actors ED actually drafts for brought it to **32.3%**.
+
+Most of what remains is genuinely impersonal and should stay unclassified —
+`Nothing in paragraph (c) of this section may be construed to …` has no actor,
+and inventing one would invent a duty. `applicant` is a known imprecision: it
+means a student in Title IV and a grant applicant in the grants parts, and
+resolving it needs part context the classifier does not yet have.
 
 Second-person drafting deserves its own note. Subparts of 34 CFR 668 address
 the reader as **`you`**, and `you` is defined *locally* — the institution in one

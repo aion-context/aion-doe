@@ -89,7 +89,10 @@ account for nearly all of them:
   Nothing about the token decides it; the em dash does. **32 → 12.**
 
 **12 in 4,721 — 0.25%** — each reported with the token, the path it did not fit
-and the text. Dropping a paragraph would drop regulatory text.
+and the text. Across the whole title: **88 in 36,828 paragraphs**, over 108
+parts and 3,296 sections. Dropping a paragraph would drop regulatory text, and
+the unresolved count goes into the signed payload so the artifact cannot claim
+a cleaner parse than it achieved.
 
 ```sh
 doe-aion part 668
@@ -149,6 +152,39 @@ One finding worth its own line: parts of 34 CFR 668 address the reader as
 borrower in another. That is 221 atoms in part 668. They are classified as
 `addressee` and left for the applicability layer to resolve against the
 subpart's own definition, because guessing would be worse than saying so.
+
+## The signed chain
+
+```sh
+# one-time signing identity (file-backed, no OS keyring needed)
+doe-aion keygen --key 1 --author 1 --keystore .keys --registry registry.json
+
+# what would change? read-only, writes nothing
+doe-aion plan
+
+# read the title, derive the obligations, sign a version, verify it
+doe-aion sync --report out/CHANGES.md
+
+# independently check the chain and that data/ matches what was signed
+doe-aion verify
+```
+
+```
+34 CFR genesis — 108 parts, 3296 sections as of 2026-08-21
+signed version 1 of doe.aion — bundle 6d8c7d04d36ea7e1
+doe.aion verified — 34 CFR as of 2026-08-21, 108 parts, 3296 sections, bundle 6d8c7d04d36ea7e1
+```
+
+A rerun at the same pin commits nothing. `sync` exits non-zero if the chain
+fails verification immediately after being written, so a bad artifact is never
+published.
+
+The payload carries the amendment ledger, a digest per part, and the derived
+obligation index — including **how many designator sequences went unresolved
+and how many bearers went unclassified**, so the signature covers the
+derivation's own limits rather than only its results. The regulation text lives
+in `data/`, committed alongside and bound by those digests: edit the text and
+`verify` fails, edit both and the signature fails.
 
 ## Quick start
 
