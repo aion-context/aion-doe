@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use doe_aion::cfr::Fetcher;
+use doe_aion::plan::Read;
 use doe_aion::severity::Severity;
 use doe_aion::{chain, plan};
 
@@ -139,8 +140,12 @@ impl Repo {
 
     /// Build, compare, write `data/`, and sign — the body of `sync`.
     fn sync(&self, fetcher: &Fetcher, date: Option<&str>) -> (Severity, bool) {
-        let built = plan::build(fetcher, date).unwrap();
+        self.sync_with(fetcher, date, Read::Incremental)
+    }
+
+    fn sync_with(&self, fetcher: &Fetcher, date: Option<&str>, read: Read) -> (Severity, bool) {
         let previous = chain::previous_bundle(&self.chain()).unwrap();
+        let built = plan::build(fetcher, date, previous.as_ref(), read).unwrap();
         let changes = plan::compare(&built.bundle, previous.as_ref());
         if changes.is_empty() {
             return (changes.severity, false);
@@ -265,7 +270,7 @@ fn a_substantive_amendment_is_detected_signed_and_named() {
         ),
     );
 
-    let built = plan::build(&upstream.fetcher(), None).unwrap();
+    let built = plan::build(&upstream.fetcher(), None, None, Read::Full).unwrap();
     let previous = chain::previous_bundle(&repo.chain()).unwrap();
     let changes = plan::compare(&built.bundle, previous.as_ref());
 
@@ -293,7 +298,7 @@ fn a_technical_amendment_does_not_shout() {
             ("668.14", "668", "2026-07-20", true),
         ],
     );
-    let built = plan::build(&upstream.fetcher(), None).unwrap();
+    let built = plan::build(&upstream.fetcher(), None, None, Read::Full).unwrap();
     let previous = chain::previous_bundle(&repo.chain()).unwrap();
     let changes = plan::compare(&built.bundle, previous.as_ref());
     assert_eq!(
@@ -304,10 +309,10 @@ fn a_technical_amendment_does_not_shout() {
 }
 
 #[test]
-fn text_edited_without_a_ledger_entry_is_still_caught() {
+fn a_full_read_catches_text_edited_without_a_ledger_entry() {
     let upstream = quiet_upstream("silent");
     let repo = Repo::new("silent");
-    assert!(repo.sync(&upstream.fetcher(), None).1);
+    assert!(repo.sync_with(&upstream.fetcher(), None, Read::Full).1);
 
     // Same ledger, different text — a correction, or an upstream slip.
     upstream.part(
@@ -319,17 +324,105 @@ fn text_edited_without_a_ledger_entry_is_still_caught() {
             "<P>An educational agency may not release education records.</P>",
         ),
     );
-    let built = plan::build(&upstream.fetcher(), None).unwrap();
     let previous = chain::previous_bundle(&repo.chain()).unwrap();
+    let built = plan::build(&upstream.fetcher(), None, previous.as_ref(), Read::Full).unwrap();
     let changes = plan::compare(&built.bundle, previous.as_ref());
-    assert!(!changes.is_empty(), "a silent edit must not pass the gate");
+    assert!(
+        !changes.is_empty(),
+        "a full read must not miss a silent edit"
+    );
     assert_eq!(changes.parts_moved, vec!["99"]);
+}
+
+#[test]
+fn an_incremental_read_does_not_see_a_silent_edit_and_that_is_the_trade() {
+    // Stated as a test rather than left implicit: incremental trusts the
+    // ledger, so an edit the ledger did not record is invisible until the next
+    // full pass. The schedule runs one a week for exactly this reason.
+    let upstream = quiet_upstream("silent-incremental");
+    let repo = Repo::new("silent-incremental");
+    assert!(repo.sync_with(&upstream.fetcher(), None, Read::Full).1);
+
+    upstream.part(
+        "99",
+        "Family Educational Rights and Privacy",
+        &section(
+            "99.3",
+            "What definitions apply?",
+            "<P>An educational agency may not release education records.</P>",
+        ),
+    );
+    let previous = chain::previous_bundle(&repo.chain()).unwrap();
+    let built = plan::build(
+        &upstream.fetcher(),
+        None,
+        previous.as_ref(),
+        Read::Incremental,
+    )
+    .unwrap();
+    assert!(
+        plan::compare(&built.bundle, previous.as_ref()).is_empty(),
+        "documented limitation, not an accident"
+    );
+    assert!(
+        built.parsed.is_empty(),
+        "nothing moved, so nothing was read"
+    );
+    assert_eq!(built.carried.len(), 2);
+}
+
+#[test]
+fn an_incremental_read_fetches_only_the_parts_the_ledger_moved() {
+    let upstream = quiet_upstream("incremental");
+    let repo = Repo::new("incremental");
+    assert!(repo.sync_with(&upstream.fetcher(), None, Read::Full).1);
+    let before = chain::previous_bundle(&repo.chain()).unwrap().unwrap();
+
+    upstream.ledger(
+        "2026-09-02",
+        &[
+            ("99.3", "99", "2026-01-15", true),
+            ("668.14", "668", "2026-09-02", true),
+        ],
+    );
+    let built = plan::build(&upstream.fetcher(), None, Some(&before), Read::Incremental).unwrap();
+
+    let read: Vec<&str> = built.parsed.iter().map(|p| p.number.as_str()).collect();
+    assert_eq!(read, vec!["668"], "only the part that moved is fetched");
+    assert_eq!(built.carried, vec!["99"]);
+    assert_eq!(
+        built.bundle.parts["99"], before.parts["99"],
+        "a carried record must be the one that was signed, unchanged"
+    );
+    assert_eq!(
+        built.bundle.totals.atoms, before.totals.atoms,
+        "carried parts still contribute their figures to the totals"
+    );
+}
+
+#[test]
+fn a_quiet_incremental_run_reads_no_part_at_all() {
+    let upstream = quiet_upstream("quiet");
+    let repo = Repo::new("quiet");
+    assert!(repo.sync_with(&upstream.fetcher(), None, Read::Full).1);
+    let before = chain::previous_bundle(&repo.chain()).unwrap().unwrap();
+
+    let built = plan::build(&upstream.fetcher(), None, Some(&before), Read::Incremental).unwrap();
+    assert!(
+        built.parsed.is_empty(),
+        "on a quiet day a run is one ledger fetch and nothing else"
+    );
+    assert_eq!(
+        built.bundle.digest().unwrap(),
+        before.digest().unwrap(),
+        "and it produces the very same bundle"
+    );
 }
 
 #[test]
 fn a_pin_past_what_ecfr_is_current_through_is_refused() {
     let upstream = quiet_upstream("future");
-    let error = plan::build(&upstream.fetcher(), Some("2026-12-01"))
+    let error = plan::build(&upstream.fetcher(), Some("2026-12-01"), None, Read::Full)
         .unwrap_err()
         .to_string();
     assert!(
@@ -342,7 +435,7 @@ fn a_pin_past_what_ecfr_is_current_through_is_refused() {
 fn an_html_error_body_aborts_instead_of_looking_like_a_removal() {
     let upstream = quiet_upstream("html");
     upstream.write("part-668.xml", "<html><body>502 Bad Gateway</body></html>");
-    let error = plan::build(&upstream.fetcher(), None)
+    let error = plan::build(&upstream.fetcher(), None, None, Read::Full)
         .unwrap_err()
         .to_string();
     assert!(
@@ -355,7 +448,7 @@ fn an_html_error_body_aborts_instead_of_looking_like_a_removal() {
 fn an_empty_ledger_is_never_read_as_everything_removed() {
     let upstream = quiet_upstream("empty");
     upstream.ledger("2026-07-20", &[]);
-    assert!(plan::build(&upstream.fetcher(), None).is_err());
+    assert!(plan::build(&upstream.fetcher(), None, None, Read::Full).is_err());
 }
 
 #[test]
@@ -370,7 +463,7 @@ fn a_ledger_part_missing_from_the_title_is_reported_not_fetched() {
             ("230.1", "230", "2019-05-01", true),
         ],
     );
-    let built = plan::build(&upstream.fetcher(), None).unwrap();
+    let built = plan::build(&upstream.fetcher(), None, None, Read::Full).unwrap();
     assert_eq!(built.retired_parts, vec!["230"]);
     assert!(!built.bundle.parts.contains_key("230"));
 }
@@ -414,7 +507,7 @@ fn a_removed_part_is_deleted_from_data_rather_than_left_behind() {
         r#"{"type":"title","identifier":"34","children":[
              {"type":"part","identifier":"668","label_description":"Student Assistance General Provisions","reserved":false}]}"#,
     );
-    let built = plan::build(&upstream.fetcher(), None).unwrap();
+    let built = plan::build(&upstream.fetcher(), None, None, Read::Full).unwrap();
     plan::write_data(&built, &repo.data()).unwrap();
     assert!(
         !repo.data().join("part-99.json").exists(),
@@ -441,7 +534,7 @@ fn the_payload_carries_what_the_derivation_could_not_settle() {
             "<P>(a) An institution must apply.</P>\n<P>(c) An institution must report.</P>",
         ),
     );
-    let built = plan::build(&upstream.fetcher(), None).unwrap();
+    let built = plan::build(&upstream.fetcher(), None, None, Read::Full).unwrap();
     assert_eq!(
         built.bundle.totals.unresolved, 1,
         "the signature must cover the parse's own limits"
@@ -453,9 +546,9 @@ fn the_payload_carries_what_the_derivation_could_not_settle() {
 #[test]
 fn the_signed_bytes_do_not_depend_on_when_the_run_happened() {
     let upstream = quiet_upstream("determinism");
-    let one = plan::build(&upstream.fetcher(), None).unwrap();
+    let one = plan::build(&upstream.fetcher(), None, None, Read::Full).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(1100));
-    let two = plan::build(&upstream.fetcher(), None).unwrap();
+    let two = plan::build(&upstream.fetcher(), None, None, Read::Full).unwrap();
     assert_eq!(
         one.bundle.to_bytes().unwrap(),
         two.bundle.to_bytes().unwrap(),
@@ -471,7 +564,7 @@ fn the_bundle_depends_on_the_pin_and_not_on_the_path_taken_to_it() {
     // different depending on when the watcher happened to run.
     let upstream = quiet_upstream("path");
 
-    let direct = plan::build(&upstream.fetcher(), None).unwrap();
+    let direct = plan::build(&upstream.fetcher(), None, None, Read::Full).unwrap();
 
     let stepwise = Repo::new("path");
     upstream.ledger("2026-05-01", &[("668.14", "668", "2026-05-01", true)]);

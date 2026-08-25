@@ -22,15 +22,47 @@ pub struct Parsed {
 #[derive(Debug)]
 pub struct Plan {
     pub bundle: Bundle,
+    /// Parts actually read from upstream this run.
     pub parsed: Vec<Parsed>,
     /// eCFR was mid-import when the ledger was read.
     pub import_in_progress: bool,
     /// Parts named by the ledger that the title no longer contains.
     pub retired_parts: Vec<String>,
+    /// Parts whose record was carried forward from the previous signed
+    /// version because the ledger showed no movement in them.
+    pub carried: Vec<String>,
 }
 
-/// Reads the whole title at `date` and derives everything the payload carries.
-pub fn build(fetcher: &Fetcher, date: Option<&str>) -> Result<Plan> {
+/// How much of the title to read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Read {
+    /// Read every part. Genesis, and any run that must not depend on the
+    /// ledger being complete.
+    Full,
+    /// Read only the parts the ledger says moved, carrying the rest forward
+    /// from `previous`.
+    Incremental,
+}
+
+/// Reads the title at `date` and derives everything the payload carries.
+///
+/// `Read::Incremental` fetches only the parts whose sections the ledger says
+/// moved, and carries every other part's record forward from `previous`
+/// unchanged. That is the point of gating on the ledger: on a quiet day a run
+/// is one ledger fetch and nothing else, against ~110 part fetches.
+///
+/// **What incremental gives up.** A change to a part's text that eCFR did not
+/// record in the ledger — a correction, or a publishing slip — is invisible to
+/// it, because the part is never re-read. `Read::Full` is what catches that,
+/// and it is why the schedule runs one full pass a week rather than trusting
+/// the ledger to be complete forever.
+#[allow(clippy::too_many_lines)]
+pub fn build(
+    fetcher: &Fetcher,
+    date: Option<&str>,
+    previous: Option<&Bundle>,
+    read: Read,
+) -> Result<Plan> {
     let status = cfr::title_status(fetcher)?;
     let date = date.unwrap_or(&status.up_to_date_as_of).to_string();
     cfr::valid_pin(&date, &status.up_to_date_as_of)?;
@@ -47,31 +79,65 @@ pub fn build(fetcher: &Fetcher, date: Option<&str>) -> Result<Plan> {
         .filter(|part| !part.is_empty() && !live_numbers.contains(part))
         .collect();
 
+    // Parts the ledger says moved since the previous signed version. On a full
+    // read this is unused; on an incremental one it is the whole work list.
+    let moved: std::collections::BTreeSet<String> = match (read, previous) {
+        (Read::Incremental, Some(previous)) => ledger
+            .changes_since(&previous.ledger)
+            .parts()
+            .into_iter()
+            .collect(),
+        _ => std::collections::BTreeSet::new(),
+    };
+
     let mut parts = BTreeMap::new();
     let mut parsed = Vec::new();
+    let mut carried = Vec::new();
     let mut totals = Totals::default();
 
     for reference in live.iter().filter(|p| !p.reserved && !p.number.is_empty()) {
-        let raw = cfr::part_xml(fetcher, &date, &reference.number)?;
-        let part = cfr::xml::parse_part(&raw)
-            .with_context(|| format!("parsing 34 CFR part {} as of {date}", reference.number))?;
-        let (atoms, coverage) = obligations::extract(&part);
-
-        let document = serde_json::to_value(&part)?;
-        let record = PartRecord {
-            heading: if part.heading.is_empty() {
-                reference.heading.clone()
-            } else {
-                part.heading.clone()
-            },
-            sha256: canon::digest_value(&document)?,
-            raw_sha256: canon::sha256_hex(&raw),
-            sections: part.sections.len(),
-            paragraphs: coverage.paragraphs,
-            atoms: atoms.len(),
-            binding: atoms.iter().filter(|a| a.force.binding()).count(),
-            unresolved: part.sections.iter().map(|s| s.irregularities.len()).sum(),
-            pending: part.sections.iter().map(|s| s.pending.len()).sum(),
+        // Carry a part forward only when this run is incremental, the previous
+        // version already signed that part, and nothing in it moved.
+        let carry = match (read, previous) {
+            (Read::Incremental, Some(previous)) if !moved.contains(&reference.number) => {
+                previous.parts.get(&reference.number)
+            }
+            _ => None,
+        };
+        let record = if let Some(record) = carry {
+            carried.push(reference.number.clone());
+            record.clone()
+        } else {
+            let raw = cfr::part_xml(fetcher, &date, &reference.number)?;
+            let part = cfr::xml::parse_part(&raw).with_context(|| {
+                format!("parsing 34 CFR part {} as of {date}", reference.number)
+            })?;
+            let (atoms, coverage) = obligations::extract(&part);
+            let document = serde_json::to_value(&part)?;
+            let record = PartRecord {
+                heading: if part.heading.is_empty() {
+                    reference.heading.clone()
+                } else {
+                    part.heading.clone()
+                },
+                sha256: canon::digest_value(&document)?,
+                raw_sha256: canon::sha256_hex(&raw),
+                sections: part.sections.len(),
+                paragraphs: coverage.paragraphs,
+                atoms: atoms.len(),
+                binding: atoms.iter().filter(|a| a.force.binding()).count(),
+                unresolved: part.sections.iter().map(|s| s.irregularities.len()).sum(),
+                pending: part.sections.iter().map(|s| s.pending.len()).sum(),
+                unclassified_bearer: coverage.unclassified,
+                by_force: coverage.by_force,
+                by_bearer: coverage.by_bearer,
+            };
+            parsed.push(Parsed {
+                number: reference.number.clone(),
+                record: record.clone(),
+                document,
+            });
+            record
         };
 
         totals.parts += 1;
@@ -81,20 +147,14 @@ pub fn build(fetcher: &Fetcher, date: Option<&str>) -> Result<Plan> {
         totals.binding += record.binding;
         totals.unresolved += record.unresolved;
         totals.pending += record.pending;
-        totals.unclassified_bearer += coverage.unclassified;
-        for (key, count) in coverage.by_force {
-            *totals.by_force.entry(key).or_insert(0) += count;
+        totals.unclassified_bearer += record.unclassified_bearer;
+        for (key, count) in &record.by_force {
+            *totals.by_force.entry(key.clone()).or_insert(0) += count;
         }
-        for (key, count) in coverage.by_bearer {
-            *totals.by_bearer.entry(key).or_insert(0) += count;
+        for (key, count) in &record.by_bearer {
+            *totals.by_bearer.entry(key.clone()).or_insert(0) += count;
         }
-
-        parts.insert(reference.number.clone(), record.clone());
-        parsed.push(Parsed {
-            number: reference.number.clone(),
-            record,
-            document,
-        });
+        parts.insert(reference.number.clone(), record);
     }
 
     let bundle = Bundle {
@@ -122,6 +182,7 @@ pub fn build(fetcher: &Fetcher, date: Option<&str>) -> Result<Plan> {
         parsed,
         import_in_progress: status.import_in_progress,
         retired_parts,
+        carried,
     })
 }
 
@@ -174,10 +235,17 @@ pub fn compare(current: &Bundle, previous: Option<&Bundle>) -> Changes {
 /// Writes the reviewable per-part JSON the payload's digests bind.
 pub fn write_data(plan: &Plan, data_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
-    let mut expected: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // Every part in the payload is expected on disk, including the ones this
+    // run carried forward rather than re-read — their files are already there
+    // and still match the digests the payload carries.
+    let mut expected: std::collections::BTreeSet<String> = plan
+        .bundle
+        .parts
+        .keys()
+        .map(|number| format!("part-{number}.json"))
+        .collect();
     for parsed in &plan.parsed {
         let path = data_dir.join(format!("part-{}.json", parsed.number));
-        expected.insert(format!("part-{}.json", parsed.number));
         std::fs::write(&path, canon::canonical_bytes(&parsed.document)?)?;
     }
     std::fs::write(
@@ -217,6 +285,9 @@ mod tests {
             binding: 1,
             unresolved: 0,
             pending: 0,
+            unclassified_bearer: 0,
+            by_force: BTreeMap::new(),
+            by_bearer: BTreeMap::new(),
         }
     }
 

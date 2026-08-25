@@ -61,9 +61,15 @@ whether that amendment was **substantive**, and whether the section was
 ```
 
 So a run fetches ~2 MB of ledger, compares `amendment_date` per section, and
-pulls regulation text **only for the parts that moved**. On a quiet day that is
-one request. And severity comes from ED's own judgement of what is substantive,
-rather than from a heuristic over a diff.
+pulls regulation text **only for the parts that moved**, carrying every other
+part forward from the previous signed version. On a quiet day that is one
+request against ~110. And severity comes from ED's own judgement of what is
+substantive, rather than from a heuristic over a diff.
+
+An incremental run trusts the ledger, so an edit eCFR did not record in it is
+invisible until the next full pass. `--full` re-reads everything and the
+schedule runs one a week; genesis is always full. The limitation is asserted as
+a test rather than left implicit.
 
 ## Reading the regulation
 

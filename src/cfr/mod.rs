@@ -44,10 +44,16 @@ impl Fetcher {
     }
 }
 
+/// Spacing between live requests. Reading a whole title is ~110 requests, and
+/// eCFR is a public service with no published quota; going flat out gets a run
+/// throttled into a multi-minute crawl, which is slower than pausing.
+const COURTESY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// eCFR rate-limits and occasionally times out on whole-title requests. A
 /// retried transport error is not a change signal, so it must never surface as
 /// one — the run aborts instead of committing a partial view.
 fn http_get(url: &str) -> Result<Vec<u8>> {
+    std::thread::sleep(COURTESY_DELAY);
     let mut last = None;
     for attempt in 0..4u32 {
         if attempt > 0 {

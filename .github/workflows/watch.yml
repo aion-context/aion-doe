@@ -1,12 +1,20 @@
 name: watch
 
-# eCFR updates on business days as amendments are incorporated; a daily run an
-# hour into the US working day catches them. The push trigger means the chain
-# bootstraps itself: the first run after any push to main writes genesis, with
-# no one having to start it by hand.
+# eCFR updates on business days as amendments are incorporated; a weekday run an
+# hour into the US working day catches them, and reads only the parts the
+# amendment ledger says moved — on a quiet day that is one ledger fetch.
+#
+# The Saturday run re-reads the whole title. Incremental runs trust the ledger,
+# so a text change eCFR did not record in it would be invisible; one full pass a
+# week is what closes that gap without spending ~110 fetches every day.
+#
+# The push trigger means the chain bootstraps itself: the first run after any
+# push to main writes genesis, with no one having to start it by hand. Genesis
+# is always a full read, because there is no previous version to carry forward.
 on:
   schedule:
     - cron: '30 13 * * 1-5'
+    - cron: '15 12 * * 6'
   push:
     branches: [main]
   workflow_dispatch:
@@ -16,6 +24,10 @@ on:
         type: string
       force:
         description: Sign a chain version even when nothing moved
+        type: boolean
+        default: false
+      full:
+        description: Re-read every part instead of only those the ledger moved
         type: boolean
         default: false
 
@@ -67,13 +79,14 @@ jobs:
           AION_SIGNING_KEY: ${{ secrets.AION_SIGNING_KEY }}
           DATE: ${{ inputs.date && format('--date {0}', inputs.date) || '' }}
           FORCE: ${{ inputs.force && '--force' || '' }}
+          FULL: ${{ (inputs.full || github.event.schedule == '15 12 * * 6') && '--full' || '' }}
         run: |
           ./target/release/doe-aion sync \
             --author "$AION_AUTHOR" \
             --key "$AION_KEY" \
             --report out/CHANGES.md \
             --outputs "$GITHUB_OUTPUT" \
-            $DATE $FORCE
+            $DATE $FORCE $FULL
 
       - name: verify the signed chain independently
         if: steps.sync.outputs.committed == 'true'

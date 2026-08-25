@@ -88,7 +88,25 @@ page are marked substantive.
 
 So the pipeline does not fetch the title and diff it. It fetches ~2 MB of
 ledger, compares `amendment_date` per section, and pulls XML **only for the
-parts that moved**. On a quiet day that is one ledger fetch and nothing else.
+parts that moved**, carrying every other part's record forward from the
+previous signed version unchanged. On a quiet day a run is one ledger fetch and
+nothing else, against ~110 part fetches.
+
+That is not a micro-optimisation. Reading the whole title live takes long enough
+on a shared runner to be throttled into a multi-minute crawl — measured, on the
+first CI run, before the incremental path existed.
+
+**What incremental gives up, and what pays for it.** An edit eCFR did not record
+in the ledger — a correction, a publishing slip — is invisible to an incremental
+run, because the part is never re-read. `--full` re-reads everything, and the
+schedule runs one full pass a week for exactly that reason. Genesis is always a
+full read, because there is no previous version to carry forward. Both cases are
+asserted as tests, including the negative one: an incremental run *not* seeing a
+silent edit is a documented limitation, not an accident.
+
+Per-part records therefore carry their own force and bearer breakdowns, not just
+their digest, so a carried part contributes the same figures a re-read one would
+and the payload totals are a plain sum in either case.
 
 Two facts the ledger gives that a content digest could never recover:
 

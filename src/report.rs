@@ -264,6 +264,7 @@ mod tests {
             parsed: Vec::new(),
             import_in_progress: false,
             retired_parts: Vec::new(),
+            carried: Vec::new(),
         };
         let text = markdown(&plan, &genesis, None);
         assert!(text.contains("no delta to show"));
@@ -280,6 +281,7 @@ mod tests {
             parsed: Vec::new(),
             import_in_progress: false,
             retired_parts: Vec::new(),
+            carried: Vec::new(),
         };
         let first = markdown(&plan, &changes(Severity::Major, false), None)
             .lines()
@@ -297,6 +299,7 @@ mod tests {
             parsed: Vec::new(),
             import_in_progress: false,
             retired_parts: vec!["230".into()],
+            carried: Vec::new(),
         };
         let text = markdown(&plan, &changes(Severity::Major, false), None);
         assert!(text.contains("unresolved designator sequences"));
@@ -312,6 +315,7 @@ mod tests {
             parsed: Vec::new(),
             import_in_progress: true,
             retired_parts: Vec::new(),
+            carried: Vec::new(),
         };
         let text = markdown(&plan, &changes(Severity::Metadata, false), None);
         assert!(text.contains("import in progress"));

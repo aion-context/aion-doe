@@ -53,6 +53,9 @@ enum Command {
         date: Option<String>,
         #[arg(long, default_value = "doe.aion")]
         chain: std::path::PathBuf,
+        /// Re-read every part instead of only those the ledger says moved.
+        #[arg(long)]
+        full: bool,
     },
     /// Fetch, diff, sign a new chain version, and verify it.
     Sync {
@@ -82,6 +85,10 @@ enum Command {
         /// Sign a version even when nothing moved.
         #[arg(long)]
         force: bool,
+        /// Re-read every part instead of only those the ledger says moved.
+        /// Catches a text change eCFR did not record in the ledger.
+        #[arg(long)]
+        full: bool,
     },
     /// Check the chain, and that `data/` matches what was signed.
     Verify {
@@ -176,9 +183,18 @@ fn main() -> Result<()> {
             let seed = chain::reveal_secret(key, author, Some(keystore), &registry)?;
             println!("{seed}");
         }
-        Command::Plan { date, chain: path } => {
-            let built = plan::build(&fetcher, date.as_deref())?;
+        Command::Plan {
+            date,
+            chain: path,
+            full,
+        } => {
             let previous = chain::previous_bundle(&path)?;
+            let built = plan::build(
+                &fetcher,
+                date.as_deref(),
+                previous.as_ref(),
+                read_mode(full),
+            )?;
             let changes = plan::compare(&built.bundle, previous.as_ref());
             println!("{}", report::headline(&changes, &built.bundle));
             println!();
@@ -199,9 +215,15 @@ fn main() -> Result<()> {
             report: report_path,
             outputs,
             force,
+            full,
         } => {
-            let built = plan::build(&fetcher, date.as_deref())?;
             let previous = chain::previous_bundle(&path)?;
+            let built = plan::build(
+                &fetcher,
+                date.as_deref(),
+                previous.as_ref(),
+                read_mode(full),
+            )?;
             let changes = plan::compare(&built.bundle, previous.as_ref());
             let text = report::markdown(&built, &changes, previous.as_ref());
             if let Some(report_path) = &report_path {
@@ -508,6 +530,14 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn read_mode(full: bool) -> plan::Read {
+    if full {
+        plan::Read::Full
+    } else {
+        plan::Read::Incremental
+    }
 }
 
 fn resolve_date(fetcher: &Fetcher, date: Option<String>) -> Result<String> {

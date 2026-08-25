@@ -51,6 +51,16 @@ pub struct PartRecord {
     pub unresolved: usize,
     /// Amendments eCFR has published but not yet incorporated.
     pub pending: usize,
+    /// Atoms whose bearer no pattern matched.
+    #[serde(default)]
+    pub unclassified_bearer: usize,
+    /// Per-part breakdowns, so a part carried forward from the previous
+    /// version contributes the same figures a re-read one would, and the
+    /// totals are a plain sum in both cases.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_force: BTreeMap<String, usize>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub by_bearer: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +187,9 @@ mod tests {
             binding: 1,
             unresolved: 0,
             pending: 0,
+            unclassified_bearer: 0,
+            by_force: BTreeMap::new(),
+            by_bearer: BTreeMap::new(),
         }
     }
 
