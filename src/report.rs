@@ -119,6 +119,13 @@ pub fn markdown(plan: &Plan, changes: &Changes, previous: Option<&Bundle>) -> St
 
     if !changes.parts_moved.is_empty() && !changes.genesis {
         let _ = writeln!(out, "## Parts whose text moved\n");
+        let _ = writeln!(
+            out,
+            "> Part digests are taken over the *parsed* text, so a change in how this \
+             program reads the regulation produces the same signal as a change upstream. \
+             When no section's amendment date moved, that is the likelier explanation, \
+             and the two are not distinguishable from the payload alone.\n"
+        );
         let _ = writeln!(out, "| part | heading | sections | atoms | binding |");
         let _ = writeln!(out, "|---|---|---|---|---|");
         for number in changes.parts_moved.iter().take(40) {
@@ -290,6 +297,22 @@ mod tests {
             .to_string();
         assert_eq!(first.matches("34 CFR").count(), 0, "got: {first}");
         assert!(first.starts_with("# TITLE 34 CHANGED"));
+    }
+
+    #[test]
+    fn text_moving_with_no_amendment_behind_it_names_the_other_explanation() {
+        // 18 parts moved once because the reader was corrected, not because
+        // eCFR republished. A reader must not take that for the agency acting.
+        let plan = Plan {
+            bundle: bundle(),
+            parsed: Vec::new(),
+            import_in_progress: false,
+            retired_parts: Vec::new(),
+            carried: Vec::new(),
+        };
+        let text = markdown(&plan, &changes(Severity::Minor, false), None);
+        assert!(text.contains("Parts whose text moved"));
+        assert!(text.contains("change in how this program reads"));
     }
 
     #[test]
