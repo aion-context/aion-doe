@@ -49,13 +49,23 @@ impl Fetcher {
 /// throttled into a multi-minute crawl, which is slower than pausing.
 const COURTESY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// Attempts before a transport failure aborts the run.
+///
+/// Four was not enough. A full read is ~110 requests and eCFR answers some of
+/// them with 503 under that load; with backoff capped near eight seconds the
+/// attempts were exhausted while the service was still merely busy. A retried
+/// transport error is not a change signal, so the cost of giving up early is a
+/// run that fails rather than one that reports something false — but it is
+/// still a run that fails, and the weekly full pass depends on this.
+const ATTEMPTS: u32 = 7;
+
 /// eCFR rate-limits and occasionally times out on whole-title requests. A
 /// retried transport error is not a change signal, so it must never surface as
 /// one — the run aborts instead of committing a partial view.
 fn http_get(url: &str) -> Result<Vec<u8>> {
     std::thread::sleep(COURTESY_DELAY);
     let mut last = None;
-    for attempt in 0..4u32 {
+    for attempt in 0..ATTEMPTS {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_secs(2u64.pow(attempt)));
         }

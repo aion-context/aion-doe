@@ -336,14 +336,22 @@ pub fn parse_lead(text: &str) -> (Lead, &str) {
         let width_before = rest.len();
         while let Some(after) = rest.strip_prefix('(') {
             let Some(close) = after.find(')') else { break };
-            let token = &after[..close];
+            // The designator itself may be italicised: the CFR sets its
+            // fifth-level arabic in italic to distinguish it from the second,
+            // so `(a)(1)(i)(A)` is followed by an italic `(1)`. The markers
+            // land *inside* the parentheses, so the token has to be stripped
+            // before it is validated - otherwise it fails the alphanumeric
+            // test, the paragraph silently inherits the previous citation, and
+            // its text keeps a stray designator at the front. Measured: 187
+            // such designators across the parts captured from Title 34.
+            let token = strip_markers(&after[..close]);
             if token.is_empty()
                 || token.len() > 6
                 || !token.chars().all(|c| c.is_ascii_alphanumeric())
             {
                 break;
             }
-            lead.designators.push(token.to_string());
+            lead.designators.push(token);
             rest = after[close + 1..].trim_start();
         }
         rest = skip_joiner(rest);
@@ -594,6 +602,28 @@ mod tests {
             Some("Written arrangements between eligible institutions.")
         );
         assert!(rest.starts_with("Except as provided"));
+    }
+
+    #[test]
+    fn an_italicised_fifth_level_designator_is_still_a_designator() {
+        // 34 CFR sets level-five arabic in italic to distinguish it from level
+        // two. Failing to strip the markers files the paragraph under its
+        // parent and leaves the designator sitting in the regulatory text - a
+        // wrong citation that reads as ordinary prose.
+        let mut stack = Stack::new();
+        for token in ["a", "1", "i", "A"] {
+            stack.push(token);
+        }
+        let (lead, rest) = parse_lead("(\u{1}1\u{2}) The first of the deeper list");
+        assert_eq!(lead.designators, vec!["1"]);
+        assert_eq!(rest, "The first of the deeper list");
+        assert_eq!(
+            stack.push(&lead.designators[0]),
+            Step::Opened {
+                depth: 4,
+                system: System::Arabic
+            }
+        );
     }
 
     #[test]
