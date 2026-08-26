@@ -1,0 +1,100 @@
+# doe-aion
+
+> Watches the Department of Education's machine-readable sources, detects real
+> change in **34 CFR** — all of Title 34, Education — and emits a
+> cryptographically signed `.aion` chain.
+
+## What this repository is
+
+It reads Title 34 of the Code of Federal Regulations from eCFR at a pinned
+date, reconstructs each section's paragraph tree, derives obligation atoms from
+the regulatory prose, and signs the result. Released as `chain-vN` tags.
+
+Current state: 108 live parts, 3,296 sections, 36,828 paragraphs, 18,088
+obligation atoms of which 12,064 binding.
+
+Title 34 includes **IDEA Part B (34 CFR 300)** and **Part C (34 CFR 303)**,
+FERPA (part 99), the civil-rights parts (100, 104, 106, 110) and EDGAR
+(parts 75–77, 81, 84, 86), alongside the Title IV student-aid parts (600–694).
+
+## What you may and may not conclude from it
+
+- **A signature proves provenance, not correctness.** The chain proves what this
+  program read from eCFR on a given date and which key signed for it. It does
+  **not** prove the reading was right, that the derived obligations are
+  complete, or that a bearer was correctly identified.
+- **The upstream source is not the official legal edition.** eCFR is an
+  editorial compilation; the Administrative Committee of the Federal Register
+  has not granted it official status, and until it does the compilation does not
+  provide legal notice to the public or judicial notice to the courts. Verify
+  against the official CFR, the Federal Register, and the LSA. A signed chain
+  over an unofficial source is still an unofficial source, signed.
+- **Not legal advice, and not a compliance determination.**
+- **Coverage limits are inside the signed payload, deliberately.** As of
+  `chain-v2`: 88 unresolved designator sequences across 36,828 paragraphs
+  (0.24%), 5,841 atoms with an unclassified bearer (32.3%), 9 amendments
+  published in the Federal Register but not yet incorporated into the text a
+  pin retrieves.
+- **`applicant` is a known ambiguity** — a student in Title IV, a grant
+  applicant in the grants parts — and second-person `you` is defined per
+  subpart and reported as `addressee` rather than guessed.
+
+## The relationship to the other repositories
+
+| repository | corpus | this repo's relation to it |
+|---|---|---|
+| `aion-context` | the `.aion` format and library | dependency |
+| `selpa-aion` | Cal. Educ. Code Part 30 (special education) | **cites into this one** |
+| `fedramp-aion` | FedRAMP, NIST 800-53, CISA KEV | sibling, same pattern, no data overlap |
+
+### Being resolved into, from `selpa-aion`
+
+California's Education Code cites 34 CFR in its own statutory text. 96 of
+Part 30's 401 sections do so, and `selpa-aion` carries those citations in its
+signed payload. To resolve one here:
+
+1. `selpa-aion federal 56341 --json` yields e.g. `["34 CFR 300.308", "34 CFR 300.310"]`.
+2. Take the part before the dot — `300`.
+3. Read `data/part-300.json` in this repository.
+4. Find the entry in `sections[]` whose `identifier` equals `300.308`.
+5. Its `paragraphs[]` carry citations of the form `34 CFR 300.308(a)(1)`.
+
+The two chains are signed independently and by design: neither vouches for the
+other, and a joined answer is only as good as both signatures plus this
+resolution step.
+
+## Where the data is
+
+- `doe.aion` — the signed chain. One payload, versioned.
+- `registry.json` — public keys only. No private material is ever published.
+- `data/part-<n>.json` — one file per live part, bound by digests inside the
+  signed payload. Edit one and `doe-aion verify` fails.
+- `data/ledger.json` — eCFR's amendment ledger, per section.
+- Releases carry the chain, the registry, and all parts in one archive.
+
+## Commands an agent can rely on
+
+```sh
+doe-aion verify --json           # structured verdict; exit 0 valid, 1 invalid
+doe-aion part 300                # structure, pending amendments, unresolved sequences
+doe-aion obligations 300 --json  # derived atoms with force, bearer, citation
+doe-aion ledger --since 2026-07-01
+```
+
+`verify --json` reports `valid`, `version`, `pinned_date`, `bundle_sha256`, the
+totals, **and** `unresolved`, `unclassified_bearer` and `pending_amendments`, so
+a consumer can weigh the derivation's limits rather than discovering them later.
+
+## One distinction that matters
+
+`pending_amendments` counts changes eCFR has **published and not yet folded into
+the text**. The regulation an institution reads today has not changed; the rule
+that will change it exists. Reporting only one of those would be misleading, so
+the artifact carries both.
+
+## Reading order
+
+1. `README.md` — the walk, with the measurements behind each decision
+2. `DESIGN.md` — upstream behaviour, change-detection rules, determinism invariants
+3. `src/cfr/paragraph.rs` — why `(i)` after `(h)` is not `(i)` after `(a)(1)`
+4. `src/obligations.rs` — why `may not` is a prohibition and the Secretary is not the institution
